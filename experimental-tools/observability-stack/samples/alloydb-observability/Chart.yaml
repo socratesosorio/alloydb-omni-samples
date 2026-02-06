@@ -1,0 +1,21 @@
+apiVersion: v2
+name: alloydb-observability
+description: >-
+  An observability bundle for AlloyDB Omni on Kubernetes.
+  Deploys Prometheus, Grafana, Loki, OpenTelemetry Collector,
+  and pre-built dashboards and alerts for monitoring DBCluster fleets.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+dependencies:
+  - name: kube-prometheus-stack
+    version: 65.0.0
+    repository: https://prometheus-community.github.io/helm-charts
+  - name: opentelemetry-collector
+    version: 0.110.0
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+    condition: opentelemetry-collector.enabled
+  - name: loki
+    version: 6.3.0
+    repository: https://grafana.github.io/helm-charts
+    condition: loki.enabled

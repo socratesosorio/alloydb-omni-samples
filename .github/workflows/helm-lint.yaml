@@ -1,0 +1,83 @@
+name: Helm Chart Lint & Validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'experimental-tools/observability-stack/samples/alloydb-observability/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'experimental-tools/observability-stack/samples/alloydb-observability/**'
+
+jobs:
+  lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+      - name: Build dependencies
+        run: |
+          helm dependency build experimental-tools/observability-stack/samples/alloydb-observability
+
+      - name: Lint chart
+        run: |
+          helm lint experimental-tools/observability-stack/samples/alloydb-observability
+
+  template:
+    name: Helm Template Render
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+      - name: Build dependencies
+        run: |
+          helm dependency build experimental-tools/observability-stack/samples/alloydb-observability
+
+      - name: Template render
+        run: |
+          helm template test-release experimental-tools/observability-stack/samples/alloydb-observability \
+            --namespace monitoring \
+            --debug
+
+  validate-dashboards:
+    name: Validate Dashboard JSONs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate JSON files
+        run: |
+          for f in experimental-tools/observability-stack/samples/alloydb-observability/files/dashboards/*.json; do
+            echo "Validating $f..."
+            python3 -m json.tool "$f" > /dev/null
+            echo "  OK"
+          done

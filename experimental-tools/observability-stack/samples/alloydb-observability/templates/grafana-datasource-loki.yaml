@@ -1,0 +1,21 @@
+{{- if and (index .Values "loki" "enabled") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alloydb-observability.fullname" . }}-grafana-ds-loki
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alloydb-observability.labels" . | nindent 4 }}
+    grafana_datasource: "1"
+data:
+  loki-datasource.yaml: |-
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://{{ .Release.Name }}-loki-gateway.{{ .Release.Namespace }}.svc.cluster.local:80
+        jsonData:
+          maxLines: 1000
+        isDefault: false
+{{- end }}

@@ -1,0 +1,57 @@
+{{- if and .Values.alerting.enabled .Values.alerting.email.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "alloydb-observability.fullname" . }}-alertmanager-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alloydb-observability.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      smtp_smarthost: {{ .Values.alerting.email.smarthost | quote }}
+      smtp_from: {{ .Values.alerting.email.from | quote }}
+      {{- if .Values.alerting.email.authUsername }}
+      smtp_auth_username: {{ .Values.alerting.email.authUsername | quote }}
+      {{- end }}
+      {{- if .Values.alerting.email.authPassword }}
+      smtp_auth_password: {{ .Values.alerting.email.authPassword | quote }}
+      {{- end }}
+      smtp_require_tls: {{ .Values.alerting.email.requireTLS }}
+
+    route:
+      group_by: ['alertname', 'dbcluster', 'namespace']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'email-notifications'
+      routes:
+        - receiver: 'email-critical'
+          match:
+            severity: critical
+          repeat_interval: 1h
+
+    receivers:
+      - name: 'email-notifications'
+        email_configs:
+          - to: {{ .Values.alerting.email.to | quote }}
+            send_resolved: true
+            headers:
+              Subject: >-
+                [AlloyDB Omni] {{ "{{" }} .Status | toUpper {{ "}}" }}: {{ "{{" }} .CommonLabels.alertname {{ "}}" }}
+      - name: 'email-critical'
+        email_configs:
+          - to: {{ .Values.alerting.email.to | quote }}
+            send_resolved: true
+            headers:
+              Subject: >-
+                [AlloyDB Omni CRITICAL] {{ "{{" }} .CommonLabels.alertname {{ "}}" }} - {{ "{{" }} .CommonLabels.dbcluster {{ "}}" }}
+
+    inhibit_rules:
+      - source_matchers:
+          - severity = critical
+        target_matchers:
+          - severity = warning
+        equal: ['alertname', 'dbcluster', 'namespace']
+{{- end }}

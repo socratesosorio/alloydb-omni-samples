@@ -1,0 +1,350 @@
+# AlloyDB Omni Observability Bundle - values.yaml
+# Configure the underlying components via their respective sections below.
+
+# --- AlloyDB Omni settings ---
+alloydb:
+  # Namespace where AlloyDB Omni operator and DBClusters are deployed.
+  namespace: alloydb-omni-system
+  # Label used to match AlloyDB Omni pods for service discovery.
+  appLabel: alloydb-omni
+  # Port exposing Prometheus metrics on AlloyDB Omni pods.
+  metricsPort: 9187
+  # Scrape interval for AlloyDB Omni metrics.
+  interval: 25s
+
+# --- Kube-State-Metrics custom resource config ---
+kubeStateMetrics:
+  # Enable KSM custom resource state metrics for AlloyDB Omni CRDs.
+  enabled: true
+
+# --- Alerting ---
+alerting:
+  # Enable pre-built PrometheusRule alerts.
+  enabled: true
+  # Email configuration for AlertManager notifications.
+  email:
+    enabled: false
+    smarthost: "smtp.example.com:587"
+    from: "alertmanager@example.com"
+    to: "oncall@example.com"
+    authUsername: ""
+    authPassword: ""
+    requireTLS: true
+
+# --- kube-prometheus-stack ---
+# Full configuration reference:
+# https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/values.yaml
+kube-prometheus-stack:
+  global:
+    rbac:
+      create: true
+
+  prometheus:
+    prometheusSpec:
+      # Allow ServiceMonitors from any namespace (not just the release namespace).
+      serviceMonitorSelectorNilUsesHelmValues: false
+      # Allow PodMonitors from any namespace.
+      podMonitorSelectorNilUsesHelmValues: false
+      # Allow PrometheusRules from any namespace.
+      ruleSelectorNilUsesHelmValues: false
+
+  grafana:
+    enabled: true
+    adminPassword: admin
+    # Sidecar watches for ConfigMaps with label grafana_dashboard=1.
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        folderAnnotation: grafana_folder
+        provider:
+          foldersFromFilesStructure: false
+      datasources:
+        enabled: true
+        label: grafana_datasource
+        labelValue: "1"
+    # Additional datasources provisioned via the sidecar.
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://{{ .Release.Name }}-loki-gateway.{{ .Release.Namespace }}.svc.cluster.local:80
+        jsonData:
+          maxLines: 1000
+
+  # AlertManager configuration for email alerts.
+  alertmanager:
+    enabled: true
+    alertmanagerSpec: {}
+
+  # kube-state-metrics sub-chart config (bundled in kube-prometheus-stack).
+  kube-state-metrics:
+    rbac:
+      extraRules:
+        - apiGroups: ["alloydbomni.dbadmin.goog"]
+          resources: ["*"]
+          verbs: ["list", "watch"]
+        - apiGroups: ["apiextensions.k8s.io"]
+          resources: ["customresourcedefinitions"]
+          verbs: ["list", "watch"]
+    customResourceState:
+      enabled: true
+      config:
+        kind: CustomResourceStateMetrics
+        spec:
+          resources:
+            - groupVersionKind:
+                group: alloydbomni.dbadmin.goog
+                kind: DBCluster
+                version: v1
+              metricNamePrefix: alloydb_omni_dbcluster
+              labelsFromPath:
+                dbcluster: [metadata, name]
+                namespace: [metadata, namespace]
+              metrics:
+                - name: "ha_ready"
+                  help: "HA readiness of the dbcluster, 1 if ha-ready, 0 if not ha-ready"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [status, conditions, "[type=HAReady]", status]
+                      nilIsZero: true
+                  labelsFromPath:
+                    reason: [status, conditions, "[type=HAReady]", reason]
+                - name: "primary_ready"
+                  help: "Readiness of the dbcluster primary node, 1 if ready, 0 if not ready"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [status, primary, conditions, "[type=DatabaseReady]", status]
+                      nilIsZero: true
+                  labelsFromPath:
+                    reason: [status, primary, conditions, "[type=DatabaseReady]", reason]
+                - name: "status_info"
+                  help: "Current status of the dbcluster"
+                  each:
+                    type: Info
+                    info:
+                      labelsFromPath:
+                        phase: [status, phase]
+                        database_version: [status, primary, currentDatabaseVersion]
+                        controlplane_agents_version: [status, primary, currentControlPlaneAgentsVersion]
+                        read_write_endpoint: [status, primary, endpoints, "[name=Read-Write]", value]
+                        read_only_endpoint: [status, primary, endpoints, "[name=Read-Only]", value]
+                        primary_phase: [status, primary, phase]
+                        haready_status: [status, conditions, "[type=HAReady]", status]
+                        haready_reason: [status, conditions, "[type=HAReady]", reason]
+                - name: "spec_info"
+                  help: "Spec of the dbcluster"
+                  each:
+                    type: Info
+                    info:
+                      labelsFromPath:
+                        num_standbys: [spec, availability, numberOfStandbys]
+                        database_version: [spec, databaseVersion]
+                        controlplane_agents_version: [spec, controlPlaneAgentsVersion]
+                        is_deleted: [spec, isDeleted]
+                        allow_external_incoming_traffic: [spec, allowExternalIncomingTraffic]
+                - name: "spec_num_standbys"
+                  help: "numberOfStandbys defined in the dbcluster spec"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [spec, availability, numberOfStandbys]
+                      nilIsZero: true
+                - name: "critical_incident_info"
+                  help: "DBCluster critical incidents"
+                  each:
+                    type: Info
+                    info:
+                      path: [status, criticalIncidents]
+                      labelsFromPath:
+                        create_time: [createTime]
+                        message: [message]
+                        code: [code]
+                - name: "critical_incident_create_time"
+                  help: "DBCluster critical incident create time"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [status, criticalIncidents]
+                      labelsFromPath:
+                        message: [message]
+                        code: [code]
+                      valueFrom: [createTime]
+            - groupVersionKind:
+                group: alloydbomni.dbadmin.goog
+                kind: Failover
+                version: v1
+              metricNamePrefix: alloydb_omni_failover
+              labelsFromPath:
+                dbcluster: [spec, dbclusterRef]
+                namespace: [metadata, namespace]
+                failover: [metadata, name]
+              metrics:
+                - name: "start_time"
+                  help: "Failover start time"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [status, startTime]
+                  labelsFromPath:
+                    state: [status, state]
+                    phase: [status, internal, phase]
+                - name: "end_time"
+                  help: "Failover end time"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [status, endTime]
+                  labelsFromPath:
+                    state: [status, state]
+                    phase: [status, internal, phase]
+                - name: "status_info"
+                  help: "Failover status"
+                  each:
+                    type: Info
+                    info:
+                      path: [status]
+                      labelsFromPath:
+                        start_time: [startTime]
+                        end_time: [endTime]
+                        new_primary: [internal, newPrimary]
+                        old_primary: [internal, oldPrimary]
+                        phase: [internal, phase]
+                        state: [state]
+            - groupVersionKind:
+                group: alloydbomni.dbadmin.goog
+                kind: PgBouncer
+                version: v1
+              metricNamePrefix: alloydb_omni_pgbouncer
+              labelsFromPath:
+                dbcluster: [spec, dbclusterRef]
+                namespace: [metadata, namespace]
+                pgbouncer: [metadata, name]
+              metrics:
+                - name: "status_info"
+                  help: "PgBouncer status"
+                  each:
+                    type: Info
+                    info:
+                      path: [status]
+                      labelsFromPath:
+                        endpoint: [ipAddress]
+                        phase: [phase]
+            - groupVersionKind:
+                group: alloydbomni.dbadmin.goog
+                kind: Backup
+                version: v1
+              metricNamePrefix: alloydb_omni_backup
+              labelsFromPath:
+                dbcluster: [spec, dbclusterRef]
+                namespace: [metadata, namespace]
+                backup: [metadata, name]
+              metrics:
+                - name: "status_info"
+                  help: "Backup status"
+                  each:
+                    type: Info
+                    info:
+                      path: [status]
+                      labelsFromPath:
+                        state: [state]
+                - name: "create_time"
+                  help: "Backup creation time"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [metadata, creationTimestamp]
+            - groupVersionKind:
+                group: alloydbomni.dbadmin.goog
+                kind: Restore
+                version: v1
+              metricNamePrefix: alloydb_omni_restore
+              labelsFromPath:
+                dbcluster: [spec, dbclusterRef]
+                namespace: [metadata, namespace]
+                restore: [metadata, name]
+              metrics:
+                - name: "status_info"
+                  help: "Restore status"
+                  each:
+                    type: Info
+                    info:
+                      path: [status]
+                      labelsFromPath:
+                        state: [state]
+
+# --- OpenTelemetry Collector ---
+# Collects container logs and forwards them to Loki.
+# Full configuration reference:
+# https://github.com/open-telemetry/opentelemetry-helm-charts/tree/main/charts/opentelemetry-collector
+opentelemetry-collector:
+  enabled: true
+  image:
+    repository: otel/opentelemetry-collector-contrib
+  mode: daemonset
+  presets:
+    logsCollection:
+      enabled: true
+      includeCollectorLogs: false
+  config:
+    exporters:
+      otlphttp/loki:
+        endpoint: http://{{ .Release.Name }}-loki-gateway.{{ .Release.Namespace }}.svc.cluster.local:80/otlp
+        tls:
+          insecure: true
+    processors:
+      resource:
+        attributes:
+          - action: insert
+            key: loki.resource.labels
+            value: k8s.namespace.name,k8s.pod.name,k8s.container.name
+    service:
+      pipelines:
+        logs:
+          processors: [resource]
+          exporters: [otlphttp/loki]
+
+# --- Loki ---
+# Log aggregation backend.
+# Full configuration reference:
+# https://github.com/grafana/loki/tree/main/production/helm/loki
+loki:
+  enabled: true
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+  # Use single-binary mode for simplicity in local/test deployments.
+  deploymentMode: SingleBinary
+  singleBinary:
+    replicas: 1
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  # Disable minio; use filesystem storage instead.
+  minio:
+    enabled: false
+  # Enable the gateway for a single ingress point.
+  gateway:
+    enabled: true
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false

@@ -1,0 +1,23 @@
+{{/*
+  Create a ConfigMap for each dashboard JSON in files/dashboards/.
+  The label grafana_dashboard=1 is required for the kube-prometheus-stack
+  Grafana sidecar to automatically discover and load the dashboards.
+*/}}
+{{- $root := . }}
+{{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+{{- $name := $path | base | trimSuffix ".json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alloydb-observability.fullname" $root }}-dashboard-{{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "alloydb-observability.labels" $root | nindent 4 }}
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "AlloyDB Omni"
+data:
+  {{ $name }}.json: |-
+{{ $root.Files.Get $path | indent 4 }}
+{{- end }}
